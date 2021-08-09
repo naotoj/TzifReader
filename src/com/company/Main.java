@@ -9,25 +9,30 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.zone.ZoneOffsetTransition;
 import java.time.zone.ZoneRules;
 import java.util.ArrayList;
+import java.util.List;
 
 // Reads TZif files and parses (RFC8536)
 public class Main {
-    private static final String ZONEINFODIR = "/usr/share/zoneinfo";
+    private static final Path ZONEINFODIR = Path.of("/usr/share/zoneinfo");
     private static final int MAGIC = 0x545A6966; // "TZif"
 
     public static void main(String[] args) throws Exception {
-        Files.walk(Path.of(ZONEINFODIR), FileVisitOption.FOLLOW_LINKS)
+        Files.walk(ZONEINFODIR, FileVisitOption.FOLLOW_LINKS)
                 .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
                 .forEach(Main::readTZif);
+
     }
 
     private static void readTZif(Path p) {
+        String zoneId = ZONEINFODIR.relativize(p).toString();
+        System.out.println(zoneId);
 // temporary
-        if (!p.endsWith("Los_Angeles")) {
+        if (!p.endsWith("CST6CDT")) {
             return;
         }
 
@@ -102,24 +107,24 @@ public class Main {
 //            trailing NUL (0x00) octet at the end of the last time zone
 //            designation.
             var headerV1 = new Header(bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt());
-            System.out.println("isUTCount: " + headerV1.isUTCnt+ ", isStdCount: " + headerV1.isStdCnt + ", leapCount: "
-                    + headerV1.leapCnt + ", timeCount: " + headerV1.timeCnt + ", typeCount: " + headerV1.typeCnt
-                    + ", charCount: " + headerV1.charCnt);
+//            System.out.println("isUTCount: " + headerV1.isUTCnt+ ", isStdCount: " + headerV1.isStdCnt + ", leapCount: "
+//                    + headerV1.leapCnt + ", timeCount: " + headerV1.timeCnt + ", typeCount: " + headerV1.typeCnt
+//                    + ", charCount: " + headerV1.charCnt);
 
             var dataV1 = readDataBlock(1, headerV1, bb);
-            System.out.println(dataV1);
+//            System.out.println(dataV1);
 
             DataBlock dataV2 = null;
             if (ver > 1) {
                 // skip magic/ver/reserved 20 octets
                 bb.position(bb.position() + 20);
                 var headerV2 = new Header(bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt(), bb.getInt());
-                System.out.println("isUTCount: " + headerV2.isUTCnt+ ", isStdCount: " + headerV2.isStdCnt + ", leapCount: "
-                        + headerV2.leapCnt + ", timeCount: " + headerV2.timeCnt + ", typeCount: " + headerV2.typeCnt
-                        + ", charCount: " + headerV2.charCnt);
+//                System.out.println("isUTCount: " + headerV2.isUTCnt+ ", isStdCount: " + headerV2.isStdCnt + ", leapCount: "
+//                        + headerV2.leapCnt + ", timeCount: " + headerV2.timeCnt + ", typeCount: " + headerV2.typeCnt
+//                        + ", charCount: " + headerV2.charCnt);
 
                 dataV2 = readDataBlock(ver, headerV2, bb);
-                System.out.println(dataV2);
+//                System.out.println(dataV2);
 
                 // Footer
                 var NL = bb.get(); // NL
@@ -128,10 +133,11 @@ public class Main {
                 for (char c = (char)bb.get(); c != '\n'; c = (char)bb.get()){
                     sb.append(c);
                 }
-                System.out.println(sb);
+//                System.out.println(sb);
 
             }
-            var zr = createRules(dataV2 != null ? dataV2 : dataV1);
+            var zot = createRules(dataV2 != null ? dataV2 : dataV1);
+            compareTransitions(zot, zoneId);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
@@ -294,20 +300,37 @@ public class Main {
     static record LeapSecondRecord(long occur, int corr) {}
 
 
-    private static ZoneRules createRules(DataBlock db) {
+//    private static ZoneRules createRules(DataBlock db) {
+    private static List<ZoneOffsetTransition> createRules(DataBlock db) {
         var transitions = new ArrayList<ZoneOffsetTransition>();
         var before = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[0].utoff);
         var after = ZoneOffset.UTC;
         for (int i = 0; i < db.transitionTimes.length; i++) {
             int utoff = db.localTimeTypeRecords[db.transitionTypes[i]].utoff;
             after = ZoneOffset.ofTotalSeconds(utoff);
-            transitions.add(ZoneOffsetTransition.of(
-                    LocalDateTime.ofInstant(db.transitionTimes[i], ZoneOffset.ofTotalSeconds(utoff)),
-                    before, after));
+            if (!before.equals(after)) {
+                var t = ZoneOffsetTransition.of(
+                        LocalDateTime.ofInstant(db.transitionTimes[i].plusSeconds(before.getTotalSeconds() - after.getTotalSeconds()), ZoneOffset.ofTotalSeconds(utoff)),
+                        before, after);
+                transitions.add(t);
+//System.out.println("i: " + i + ", transition: " + t );
+            }
             before = after;
         }
 //        return ZoneRules.of(ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[db.transitionTypes[0]].utoff),
-        return null;
+        return transitions;
 
+    }
+
+    // compare transitions
+    private static void compareTransitions(List<ZoneOffsetTransition> got, String refZone) {
+        var zot = ZoneId.of(refZone).getRules().getTransitions();
+        for (int i = 0; i < Math.min(got.size(), zot.size()); i++) {
+            var g = got.get(i);
+            var r = zot.get(i);
+            if (!g.equals(r)) {
+                throw new RuntimeException("" + i + ": got: " + g + ", r: " + r);
+            }
+        }
     }
 }
