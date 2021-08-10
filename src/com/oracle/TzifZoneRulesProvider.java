@@ -38,26 +38,37 @@ import java.time.ZoneOffset;
 import java.time.zone.ZoneOffsetTransition;
 import java.time.zone.ZoneRules;
 import java.time.zone.ZoneRulesException;
+import java.time.zone.ZoneRulesProvider;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Set;
 import java.util.TreeMap;
 
 // Reads TZif files and parses (RFC8536)
-public class TzifZoneRulesProvider {
-    private static final Path ZONEINFODIR = Path.of("/usr/share/zoneinfo");
+public class TzifZoneRulesProvider extends ZoneRulesProvider {
     private static final int MAGIC = 0x545A6966; // "TZif"
 
-    private static final Map<String, ZoneRules> zoneRulesMap = new TreeMap<>();
+    private final Path ZONEINFODIR = Path.of("/usr/share/zoneinfo");
+    private final Map<String, ZoneRules> zoneRulesMap = new TreeMap<>();
 
-    public static void main(String[] args) throws Exception {
-        Files.walk(ZONEINFODIR, FileVisitOption.FOLLOW_LINKS)
-                .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
-                .forEach(TzifZoneRulesProvider::readTZif);
-        System.out.println(zoneRulesMap);
+    public static void main(String[] args) {
+//        new TzifZoneRulesProvider();
+        var zoneJP = ZoneId.of("Asia/Tokyo");
     }
 
-    private static void readTZif(Path p) {
+    public TzifZoneRulesProvider() {
+        try {
+            Files.walk(ZONEINFODIR, FileVisitOption.FOLLOW_LINKS)
+                    .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
+                    .forEach(this::readTZif);
+        } catch (IOException ioe) {
+            throw new UncheckedIOException(ioe);
+        }
+    }
+
+    private void readTZif(Path p) {
         String zoneId = ZONEINFODIR.relativize(p).toString();
         System.out.println(zoneId);
 // temporary
@@ -167,8 +178,8 @@ public class TzifZoneRulesProvider {
 
             }
             var zr = createRules(dataV2 != null ? dataV2 : dataV1);
-            compareTransitions(zr.getTransitions(), zoneId);
             zoneRulesMap.put(zoneId, zr);
+//            compareTransitions(zr.getTransitions(), zoneId);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
@@ -339,29 +350,42 @@ public class TzifZoneRulesProvider {
         }
 
         var transitions = new ArrayList<ZoneOffsetTransition>();
-        // look for the base offset
-        ZoneOffset baseStdOff = null;
+        var stdTransitions = new ArrayList<ZoneOffsetTransition>();
+        // look for the first offsets
+        ZoneOffset firstStdOff = null;
+        ZoneOffset stdOff = null;
+        ZoneOffset firstWallOff = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[0].utoff);
         for (int i = 0; i < db.localTimeTypeRecords.length; i ++) {
-            baseStdOff = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[i].utoff);
             if (db.localTimeTypeRecords[i].dst == 0) {
+                stdOff = firstStdOff = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[i].utoff);
                 break;
             }
         }
-        var before = baseStdOff;
+        var before = firstWallOff;
         var after = before;
         for (int i = 0; i < db.transitionTimes.length; i++) {
             int utoff = db.localTimeTypeRecords[db.transitionTypes[i]].utoff;
             after = ZoneOffset.ofTotalSeconds(utoff);
-            if (!before.equals(after)) {
-                var t = ZoneOffsetTransition.of(
-                        LocalDateTime.ofInstant(db.transitionTimes[i].plusSeconds(before.getTotalSeconds() - after.getTotalSeconds()), ZoneOffset.ofTotalSeconds(utoff)),
-                        before, after);
-                transitions.add(t);
-//System.out.println("i: " + i + ", transition: " + t );
+
+            // std transitions
+            if (db.localTimeTypeRecords[db.transitionTypes[i]].dst == 0 && !stdOff.equals(after)) {
+                stdTransitions.add(
+                   ZoneOffsetTransition.of(
+                        LocalDateTime.ofInstant(db.transitionTimes[i].plusSeconds(stdOff.getTotalSeconds() - utoff), after),
+                        stdOff, after));
+                stdOff = after;
             }
-            before = after;
+
+            // wall transitions
+            if (!before.equals(after)) {
+                transitions.add(
+                    ZoneOffsetTransition.of(
+                        LocalDateTime.ofInstant(db.transitionTimes[i].plusSeconds(before.getTotalSeconds() - utoff), after),
+                        before, after));
+                before = after;
+            }
         }
-        return ZoneRules.of(baseStdOff, baseStdOff, transitions, transitions, List.of());
+        return ZoneRules.of(firstStdOff, firstWallOff, stdTransitions, transitions, List.of());
     }
 
     // compare transitions
@@ -378,5 +402,21 @@ public class TzifZoneRulesProvider {
         } catch (ZoneRulesException zre) {
             System.out.println("compare ignored. ZRE thrown for " + refZone);
         }
+    }
+
+    // ZoneRulesProvider methods implementations
+    @Override
+    protected Set<String> provideZoneIds() {
+        return zoneRulesMap.keySet();
+    }
+
+    @Override
+    protected ZoneRules provideRules(String zoneId, boolean forCaching) {
+        return zoneRulesMap.get(zoneId);
+    }
+
+    @Override
+    protected NavigableMap<String, ZoneRules> provideVersions(String zoneId) {
+        return new TreeMap<>(Map.of("v1", zoneRulesMap.get(zoneId)));
     }
 }
