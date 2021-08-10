@@ -13,6 +13,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.zone.ZoneOffsetTransition;
 import java.time.zone.ZoneRules;
+import java.time.zone.ZoneRulesException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,9 +33,9 @@ public class Main {
         String zoneId = ZONEINFODIR.relativize(p).toString();
         System.out.println(zoneId);
 // temporary
-        if (!p.endsWith("CST6CDT")) {
-            return;
-        }
+//        if (!p.endsWith("CST6CDT")) {
+//            return;
+//        }
 
         try {
             var bb = ByteBuffer.wrap(Files.readAllBytes(p));
@@ -75,7 +76,7 @@ public class Main {
                 case '3' -> 3;
                 default -> throw new InternalError("invalid version");
             };
-            System.out.println("version : " + ver);
+//            System.out.println("version : " + ver);
 
             // skip reserved 15 octets
             bb.position(bb.position() + 15);
@@ -303,8 +304,16 @@ public class Main {
 //    private static ZoneRules createRules(DataBlock db) {
     private static List<ZoneOffsetTransition> createRules(DataBlock db) {
         var transitions = new ArrayList<ZoneOffsetTransition>();
-        var before = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[0].utoff);
-        var after = ZoneOffset.UTC;
+        // look for the base offset
+        var baseUTOff = 0;
+        for (int i = 0; i < db.transitionTypes.length; i ++) {
+            baseUTOff = db.localTimeTypeRecords[i].utoff;
+            if (db.localTimeTypeRecords[i].dst == 0) {
+                break;
+            }
+        }
+        var before = ZoneOffset.ofTotalSeconds(baseUTOff);
+        var after = before;
         for (int i = 0; i < db.transitionTimes.length; i++) {
             int utoff = db.localTimeTypeRecords[db.transitionTypes[i]].utoff;
             after = ZoneOffset.ofTotalSeconds(utoff);
@@ -324,13 +333,17 @@ public class Main {
 
     // compare transitions
     private static void compareTransitions(List<ZoneOffsetTransition> got, String refZone) {
-        var zot = ZoneId.of(refZone).getRules().getTransitions();
-        for (int i = 0; i < Math.min(got.size(), zot.size()); i++) {
-            var g = got.get(i);
-            var r = zot.get(i);
-            if (!g.equals(r)) {
-                throw new RuntimeException("" + i + ": got: " + g + ", r: " + r);
+        try {
+            var zot = ZoneId.of(refZone).getRules().getTransitions();
+            for (int i = 0; i < Math.min(got.size(), zot.size()); i++) {
+                var g = got.get(i);
+                var r = zot.get(i);
+                if (!g.equals(r)) {
+                    throw new RuntimeException("" + i + ": got: " + g + ", r: " + r);
+                }
             }
+        } catch (ZoneRulesException zre) {
+            System.out.println("compare ignored. ZRE thrown for " + refZone);
         }
     }
 }
