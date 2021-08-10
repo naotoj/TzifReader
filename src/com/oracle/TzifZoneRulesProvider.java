@@ -1,4 +1,28 @@
-package com.company;
+/*
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ * or visit www.oracle.com if you need additional information or have any
+ * questions.
+ */
+package com.oracle;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -16,17 +40,21 @@ import java.time.zone.ZoneRules;
 import java.time.zone.ZoneRulesException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 // Reads TZif files and parses (RFC8536)
-public class Main {
+public class TzifZoneRulesProvider {
     private static final Path ZONEINFODIR = Path.of("/usr/share/zoneinfo");
     private static final int MAGIC = 0x545A6966; // "TZif"
+
+    private static final Map<String, ZoneRules> zoneRulesMap = new TreeMap<>();
 
     public static void main(String[] args) throws Exception {
         Files.walk(ZONEINFODIR, FileVisitOption.FOLLOW_LINKS)
                 .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
-                .forEach(Main::readTZif);
-
+                .forEach(TzifZoneRulesProvider::readTZif);
+        System.out.println(zoneRulesMap);
     }
 
     private static void readTZif(Path p) {
@@ -34,6 +62,7 @@ public class Main {
         System.out.println(zoneId);
 // temporary
 //        if (!p.endsWith("CST6CDT")) {
+//        if (!p.endsWith("MST")) {
 //            return;
 //        }
 
@@ -137,8 +166,9 @@ public class Main {
 //                System.out.println(sb);
 
             }
-            var zot = createRules(dataV2 != null ? dataV2 : dataV1);
-            compareTransitions(zot, zoneId);
+            var zr = createRules(dataV2 != null ? dataV2 : dataV1);
+            compareTransitions(zr.getTransitions(), zoneId);
+            zoneRulesMap.put(zoneId, zr);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
@@ -302,17 +332,22 @@ public class Main {
 
 
 //    private static ZoneRules createRules(DataBlock db) {
-    private static List<ZoneOffsetTransition> createRules(DataBlock db) {
+    private static ZoneRules createRules(DataBlock db) {
+        // check for fixed offsets
+        if (db.transitionTypes.length == 0) {
+            return ZoneRules.of(ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[0].utoff));
+        }
+
         var transitions = new ArrayList<ZoneOffsetTransition>();
         // look for the base offset
-        var baseUTOff = 0;
-        for (int i = 0; i < db.transitionTypes.length; i ++) {
-            baseUTOff = db.localTimeTypeRecords[i].utoff;
+        ZoneOffset baseStdOff = null;
+        for (int i = 0; i < db.localTimeTypeRecords.length; i ++) {
+            baseStdOff = ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[i].utoff);
             if (db.localTimeTypeRecords[i].dst == 0) {
                 break;
             }
         }
-        var before = ZoneOffset.ofTotalSeconds(baseUTOff);
+        var before = baseStdOff;
         var after = before;
         for (int i = 0; i < db.transitionTimes.length; i++) {
             int utoff = db.localTimeTypeRecords[db.transitionTypes[i]].utoff;
@@ -326,9 +361,7 @@ public class Main {
             }
             before = after;
         }
-//        return ZoneRules.of(ZoneOffset.ofTotalSeconds(db.localTimeTypeRecords[db.transitionTypes[0]].utoff),
-        return transitions;
-
+        return ZoneRules.of(baseStdOff, baseStdOff, transitions, transitions, List.of());
     }
 
     // compare transitions

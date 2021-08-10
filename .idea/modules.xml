@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/TzifReader.iml" filepath="$PROJECT_DIR$/TzifReader.iml" />
+      <module fileurl="file://$PROJECT_DIR$/TzifZoneRulesProvider.iml" filepath="$PROJECT_DIR$/TzifZoneRulesProvider.iml" />
     </modules>
   </component>
 </project>
