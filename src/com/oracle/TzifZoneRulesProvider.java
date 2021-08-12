@@ -24,7 +24,9 @@
  */
 package com.oracle;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileVisitOption;
@@ -35,6 +37,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.time.zone.ZoneOffsetTransition;
 import java.time.zone.ZoneRules;
 import java.time.zone.ZoneRulesException;
@@ -53,9 +58,10 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
     private final Path ZONEINFODIR = Path.of("/usr/share/zoneinfo");
     private final Map<String, ZoneRules> zoneRulesMap = new TreeMap<>();
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
 //        new TzifZoneRulesProvider();
-        var zoneJP = ZoneId.of("Asia/Tokyo");
+
+        interactiveQuery();
     }
 
     public TzifZoneRulesProvider() {
@@ -70,12 +76,19 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
 
     private void readTZif(Path p) {
         String zoneId = ZONEINFODIR.relativize(p).toString();
-        System.out.println(zoneId);
+//        System.out.println(zoneId);
+
 // temporary
-//        if (!p.endsWith("CST6CDT")) {
 //        if (!p.endsWith("MST")) {
 //            return;
 //        }
+        if (p.getFileName().equals(Path.of("+VERSION"))) {
+            try {
+                System.out.println("TZ data version: " + Files.readString(p));
+            } catch (IOException ioe) {
+                throw new UncheckedIOException(ioe);
+            }
+        }
 
         try {
             var bb = ByteBuffer.wrap(Files.readAllBytes(p));
@@ -85,7 +98,7 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
 //            Information Format.
             int magic = bb.getInt();
             if (magic != MAGIC) {
-                System.out.println("Not a TZif file: " + p);
+//                System.out.println("Not a TZif file: " + p);
                 return;
             }
 
@@ -418,5 +431,20 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
     @Override
     protected NavigableMap<String, ZoneRules> provideVersions(String zoneId) {
         return new TreeMap<>(Map.of("v1", zoneRulesMap.get(zoneId)));
+    }
+
+    // test case
+    static void interactiveQuery() throws IOException {
+        BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+        var dtf = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.FULL);
+
+        System.out.print("Input time zone name: ");
+        var zone = ZoneId.of(in.readLine());
+        while (true) {
+            System.out.print("Input local time (in ISO_LOCAL_DATE_TIME format): ");
+            var datetime = LocalDateTime.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(in.readLine()));
+            var zdt = ZonedDateTime.of(datetime, zone);
+            System.out.println("Formatted date/time: " + dtf.format(zdt));
+        }
     }
 }
