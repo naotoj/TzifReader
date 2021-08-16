@@ -61,6 +61,7 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
     public static void main(String[] args) throws IOException {
 //        new TzifZoneRulesProvider();
 
+        // tests the ZoneRules interactively
         interactiveQuery();
     }
 
