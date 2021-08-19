@@ -77,12 +77,6 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
 
     private void readTZif(Path p) {
         String zoneId = ZONEINFODIR.relativize(p).toString();
-//        System.out.println(zoneId);
-
-// temporary
-//        if (!p.endsWith("MST")) {
-//            return;
-//        }
         if (p.getFileName().equals(Path.of("+VERSION"))) {
             try {
                 System.out.println("TZ data version: " + Files.readString(p));
