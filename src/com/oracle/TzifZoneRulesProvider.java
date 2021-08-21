@@ -39,6 +39,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.format.FormatStyle;
 import java.time.zone.ZoneOffsetTransition;
 import java.time.zone.ZoneRules;
@@ -376,7 +377,7 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
             after = ZoneOffset.ofTotalSeconds(utoff);
 
             // std transitions
-            if (db.localTimeTypeRecords[db.transitionTypes[i]].dst == 0 && !stdOff.equals(after)) {
+            if (db.localTimeTypeRecords[db.transitionTypes[i]].dst == 0 && !after.equals(stdOff)) {
                 stdTransitions.add(
                    ZoneOffsetTransition.of(
                         LocalDateTime.ofInstant(db.transitionTimes[i].plusSeconds(stdOff.getTotalSeconds() - utoff), after),
@@ -434,12 +435,27 @@ public class TzifZoneRulesProvider extends ZoneRulesProvider {
         var dtf = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.FULL);
 
         System.out.print("Input time zone name: ");
-        var zone = ZoneId.of(in.readLine());
+        ZoneId zone = null;
+        while (zone == null) {
+            try {
+                zone = ZoneId.of(in.readLine());
+            } catch (Exception e) {
+                System.err.println(e.getMessage());
+            }
+        }
         while (true) {
             System.out.print("Input local time (in ISO_LOCAL_DATE_TIME format): ");
-            var datetime = LocalDateTime.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(in.readLine()));
-            var zdt = ZonedDateTime.of(datetime, zone);
-            System.out.println("Formatted date/time: " + dtf.format(zdt));
+            try {
+                var input = in.readLine();
+                if (input.isEmpty()) {
+                    break;
+                }
+                var datetime = LocalDateTime.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(input));
+                var zdt = ZonedDateTime.of(datetime, zone);
+                System.out.println("Formatted date/time: " + dtf.format(zdt));
+            } catch (DateTimeParseException e) {
+                System.err.println(e.getMessage());
+            }
         }
     }
 }
